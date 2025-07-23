@@ -45,6 +45,7 @@ temp
 logs
 *.log
 
-# images
-images/
+# Environment variables
+VITE_MONGODB_CLUSTER_NAME 
+VITE_MONGODB_DATABASE_URL
 frontend/.env
