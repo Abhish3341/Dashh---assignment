@@ -44,3 +44,7 @@ temp
 # Logs
 logs
 *.log
+
+# images
+images/
+frontend/.env
