@@ -3,6 +3,7 @@ import { useAuth } from '../context/AuthContext';
 import { mongoService } from '../config/mongodb';
 import { User, LogOut, FileText, Upload, Search, Grid, List, Filter, MoreVertical, Download, Trash2, Eye, FolderOpen, Plus } from 'lucide-react';
 import FileUpload from '../components/FileUpload';
+import FilePreview from '../components/FilePreview';
 
 const Dashboard = () => {
   const { user, logout } = useAuth();
@@ -15,6 +16,8 @@ const Dashboard = () => {
   const [viewMode, setViewMode] = React.useState('grid');
   const [searchQuery, setSearchQuery] = React.useState('');
   const [loading, setLoading] = React.useState(true);
+  const [previewFile, setPreviewFile] = React.useState(null);
+  const [isPreviewOpen, setIsPreviewOpen] = React.useState(false);
 
   // Load user files and stats on component mount
   React.useEffect(() => {
@@ -29,6 +32,10 @@ const Dashboard = () => {
       if (filesResult.success) {
         const formattedFiles = filesResult.files.map(file => ({
           id: file._id,
+          fileName: file.fileName,
+          fileSize: file.fileSize,
+          fileType: file.fileType,
+          fileContent: file.fileContent,
           file: {
             name: file.fileName,
             size: file.fileSize,
@@ -60,23 +67,24 @@ const Dashboard = () => {
 
   const handleFilesUploaded = async (files) => {
     try {
-      const uploadPromises = files.map(async (file) => {
-        const fileData = {
-          name: file.name,
-          size: file.size,
-          type: file.type,
-          tags: [],
-          description: ''
-        };
+      const uploadPromises = files.map(async (fileData) => {
         
         const result = await mongoService.uploadFile(fileData);
         if (result.success) {
           return {
             id: result.fileId,
-            file: file,
+            file: {
+              name: fileData.name,
+              size: fileData.size,
+              type: fileData.type
+            },
+            fileName: fileData.name,
+            fileSize: fileData.size,
+            fileType: fileData.type,
+            fileContent: fileData.content,
             uploadedAt: result.file.uploadedAt,
-            size: file.size,
-            type: file.type,
+            size: fileData.size,
+            type: fileData.type,
             tags: result.file.tags,
             description: result.file.description
           };
@@ -101,18 +109,89 @@ const Dashboard = () => {
 
   const handleDeleteFile = async (fileId) => {
     try {
+      // Show confirmation dialog
+      const fileToDelete = uploadedFiles.find(file => file.id === fileId);
+      const fileName = fileToDelete?.fileName || fileToDelete?.file?.name || 'this file';
+      
+      if (!window.confirm(`Are you sure you want to delete "${fileName}"? This action cannot be undone.`)) {
+        return;
+      }
+
       const result = await mongoService.deleteFile(fileId);
       if (result.success) {
         setUploadedFiles(prev => prev.filter(file => file.id !== fileId));
+        
+        // Show success message
+        if (result.message) {
+          // You could replace this with a toast notification
+          console.log(result.message);
+        }
         
         // Refresh stats
         const statsResult = await mongoService.getUserStats();
         if (statsResult.success) {
           setUserStats(statsResult.stats);
         }
+      } else {
+        alert(`Error deleting file: ${result.error}`);
       }
     } catch (error) {
       console.error('Error deleting file:', error);
+      alert('Error deleting file. Please try again.');
+    }
+  };
+
+  const handlePreviewFile = (fileObj) => {
+    setPreviewFile(fileObj);
+    setIsPreviewOpen(true);
+  };
+
+  const handleClosePreview = () => {
+    setPreviewFile(null);
+    setIsPreviewOpen(false);
+  };
+
+  const handleDownloadFile = async (fileObj) => {
+    try {
+      const fileName = fileObj.fileName || fileObj.file?.name || fileObj.name;
+      
+      // Get the actual file content
+      let fileContent = fileObj.fileContent;
+      
+      if (!fileContent) {
+        // Try to fetch from database if not available
+        const result = await mongoService.getFileContent(fileObj.id);
+        if (result.success) {
+          fileContent = result.content;
+        } else {
+          throw new Error('File content not available');
+        }
+      }
+      
+      // Convert base64 to blob
+      const base64Data = fileContent.split(',')[1];
+      const byteCharacters = atob(base64Data);
+      const byteNumbers = new Array(byteCharacters.length);
+      for (let i = 0; i < byteCharacters.length; i++) {
+        byteNumbers[i] = byteCharacters.charCodeAt(i);
+      }
+      const byteArray = new Uint8Array(byteNumbers);
+      const blob = new Blob([byteArray], { type: fileObj.fileType || fileObj.type });
+      
+      const url = window.URL.createObjectURL(blob);
+      
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+      
+      console.log('File downloaded:', fileName);
+    } catch (error) {
+      console.error('Download error:', error);
+      alert('Error downloading file. Please try again.');
     }
   };
 
@@ -331,13 +410,25 @@ const Dashboard = () => {
                             {formatFileSize(fileObj.size)}
                           </p>
                           <div className="flex items-center space-x-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
-                            <button className="p-1.5 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors duration-200">
+                            <button 
+                              onClick={() => handlePreviewFile(fileObj)}
+                              className="p-1.5 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors duration-200"
+                              title="Preview file"
+                            >
                               <Eye className="w-3 h-3 text-slate-600" />
                             </button>
-                            <button className="p-1.5 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors duration-200">
+                            <button 
+                              onClick={() => handleDownloadFile(fileObj)}
+                              className="p-1.5 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors duration-200"
+                              title="Download file"
+                            >
                               <Download className="w-3 h-3 text-slate-600" />
                             </button>
-                            <button onClick={() => handleDeleteFile(fileObj.id)} className="p-1.5 bg-slate-100 hover:bg-red-100 rounded-lg transition-colors duration-200">
+                            <button 
+                              onClick={() => handleDeleteFile(fileObj.id)} 
+                              className="p-1.5 bg-slate-100 hover:bg-red-100 rounded-lg transition-colors duration-200"
+                              title="Delete file"
+                            >
                               <Trash2 className="w-3 h-3 text-slate-600 hover:text-red-600" />
                             </button>
                           </div>
@@ -359,13 +450,25 @@ const Dashboard = () => {
                           </div>
                         </div>
                         <div className="flex items-center space-x-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
-                          <button className="p-2 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors duration-200">
+                          <button 
+                            onClick={() => handlePreviewFile(fileObj)}
+                            className="p-2 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors duration-200"
+                            title="Preview file"
+                          >
                             <Eye className="w-4 h-4 text-slate-600" />
                           </button>
-                          <button className="p-2 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors duration-200">
+                          <button 
+                            onClick={() => handleDownloadFile(fileObj)}
+                            className="p-2 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors duration-200"
+                            title="Download file"
+                          >
                             <Download className="w-4 h-4 text-slate-600" />
                           </button>
-                          <button onClick={() => handleDeleteFile(fileObj.id)} className="p-2 bg-slate-100 hover:bg-red-100 rounded-lg transition-colors duration-200">
+                          <button 
+                            onClick={() => handleDeleteFile(fileObj.id)} 
+                            className="p-2 bg-slate-100 hover:bg-red-100 rounded-lg transition-colors duration-200"
+                            title="Delete file"
+                          >
                             <Trash2 className="w-4 h-4 text-slate-600 hover:text-red-600" />
                           </button>
                           <button className="p-2 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors duration-200">
@@ -380,6 +483,14 @@ const Dashboard = () => {
           </div>
         </div>
       </main>
+
+      {/* File Preview Modal */}
+      <FilePreview
+        file={previewFile}
+        isOpen={isPreviewOpen}
+        onClose={handleClosePreview}
+        onDownload={handleDownloadFile}
+      />
     </div>
   );
 };

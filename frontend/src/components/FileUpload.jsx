@@ -4,28 +4,88 @@ import { Upload, File, X } from 'lucide-react';
 const FileUpload = ({ onFilesUploaded }) => {
   const [selectedFiles, setSelectedFiles] = useState([]);
   const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState({});
 
   const handleFileSelect = (e) => {
     const files = Array.from(e.target.files);
     setSelectedFiles(files);
   };
 
+  const convertFileToBase64 = (file) => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = error => reject(error);
+    });
+  };
   const handleUpload = async () => {
     if (selectedFiles.length === 0) return;
     
     setUploading(true);
+    setUploadProgress({});
     
-    // Simulate upload - replace with actual API call later
-    setTimeout(() => {
-      if (onFilesUploaded) {
-        onFilesUploaded(selectedFiles);
+    try {
+      const uploadedFiles = [];
+      
+      for (let i = 0; i < selectedFiles.length; i++) {
+        const file = selectedFiles[i];
+        
+        // Update progress
+        setUploadProgress(prev => ({
+          ...prev,
+          [file.name]: { status: 'converting', progress: 0 }
+        }));
+        
+        try {
+          // Convert file to base64
+          const base64Content = await convertFileToBase64(file);
+          
+          setUploadProgress(prev => ({
+            ...prev,
+            [file.name]: { status: 'uploading', progress: 50 }
+          }));
+          
+          const fileData = {
+            name: file.name,
+            size: file.size,
+            type: file.type,
+            content: base64Content, // Store actual file content
+            lastModified: file.lastModified,
+            tags: [],
+            description: ''
+          };
+          
+          uploadedFiles.push(fileData);
+          
+          setUploadProgress(prev => ({
+            ...prev,
+            [file.name]: { status: 'completed', progress: 100 }
+          }));
+          
+        } catch (error) {
+          console.error(`Error processing file ${file.name}:`, error);
+          setUploadProgress(prev => ({
+            ...prev,
+            [file.name]: { status: 'error', progress: 0 }
+          }));
+        }
       }
+      
+      if (onFilesUploaded && uploadedFiles.length > 0) {
+        await onFilesUploaded(uploadedFiles);
+      }
+      
+    } catch (error) {
+      console.error('Upload error:', error);
+    } finally {
       setSelectedFiles([]);
       setUploading(false);
+      setUploadProgress({});
       // Reset the file input
       const fileInput = document.querySelector('input[type="file"]');
       if (fileInput) fileInput.value = '';
-    }, 1000);
+    }
   };
 
   const removeFile = (indexToRemove) => {
@@ -74,6 +134,21 @@ const FileUpload = ({ onFilesUploaded }) => {
                     <p className="text-xs text-slate-500">
                       {formatFileSize(file.size)}
                     </p>
+                    {uploadProgress[file.name] && (
+                      <div className="mt-1">
+                        <div className="flex items-center space-x-2">
+                          <div className="w-20 bg-gray-200 rounded-full h-1">
+                            <div 
+                              className="bg-blue-600 h-1 rounded-full transition-all duration-300" 
+                              style={{ width: `${uploadProgress[file.name].progress}%` }}
+                            ></div>
+                          </div>
+                          <span className="text-xs text-slate-500">
+                            {uploadProgress[file.name].status}
+                          </span>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
                 <button
